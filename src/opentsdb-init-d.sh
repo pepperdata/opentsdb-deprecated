@@ -70,7 +70,7 @@ start() {
   : ${JVMXMX:=-Xmx6000m}
   : ${JVMARGS:=-DLOG_FILE_PREFIX=${LOG_FILE} -enableassertions -enablesystemassertions $JVMXMX -XX:OnOutOfMemoryError=/usr/share/opentsdb/opentsdb_restart.py}
   export JVMARGS
-  daemon --user $USER --pidfile $PID_FILE "$PROG $PROG_OPTS 1> ${LOG_FILE_PREFIX}opentsdb.out 2> ${LOG_FILE_PREFIX}opentsdb.err"
+  daemon --user $USER --pidfile $PID_FILE "$PROG $PROG_OPTS 1> ${LOG_FILE}opentsdb.out 2> ${LOG_FILE}opentsdb.err"
   retval=$?
   sleep 2
   echo
