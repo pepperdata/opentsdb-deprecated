@@ -1,51 +1,90 @@
 #!/bin/sh
 #
-# Modified from:
-#   https://github.com/OpenTSDB/opentsdb/blob/v2.0.0RC2/build-aux/deb/init.d/opentsdb.
-#   https://github.com/masiulaniec/opentsdb-rhel/blob/master/src/tsdb-server.init
+# opentsdb      This shell script takes care of starting and stopping OpenTSDB.
+#
+# chkconfig: 35 99 01
+# description: OpenTSDB is a distributed, scalable Time Series Database (TSDB) \
+# written on top of HBase. OpenTSDB was written to address a common need: store, \
+# index and serve metrics collected from computer systems (network gear, operating \
+# systems, applications) at a large scale, and make this data easily accessible \
+# and graphable.
 
-. /lib/lsb/init-functions
+### BEGIN INIT INFO
+# Provides: opentsdb
+# Required-Start: $network $local_fs $remote_fs
+# Required-Stop: $network $local_fs $remote_fs
+# Short-Description: start and stop opentsdb
+# Description: OpenTSDB is a distributed, scalable Time Series Database (TSDB)
+#              written on top of HBase. OpenTSDB was written to address a
+#              common need: store, index and serve metrics collected from
+#              computer systems (network gear, operating systems, applications)
+#              at a large scale, and make this data easily accessible and
+#              graphable.
+### END INIT INFO
 
-NAME=opentsdb
+# Source init functions
+. /etc/init.d/functions
+
+# Set this so that you can run as many opentsdb instances you want as long as
+# the name of this script is changed (or a symlink is used)
+NAME=`basename $0`
 
 # Maximum number of open files
 MAX_OPEN_FILES=65535
 
+# Default program options
 PROG=/usr/bin/tsdb
-PROG_OPTS=tsd
 HOSTNAME=$(hostname --fqdn)
+USER=root
+CONFIG=/etc/opentsdb/${NAME}.conf
 
-LOG_DIR=/var/log/$NAME
-LOG_FILE_PREFIX=${LOG_DIR}/${HOSTNAME}-
-[ -e $LOG_DIR ] || mkdir $LOG_DIR
+# Default directories
+LOG_DIR=/var/log/opentsdb
+LOCK_DIR=/var/lock/subsys
+PID_DIR=/var/run/opentsdb
 
+# Global and Local sysconfig files
+[ -e /etc/sysconfig/opentsdb ] && . /etc/sysconfig/opentsdb
 [ -e /etc/sysconfig/$NAME ] && . /etc/sysconfig/$NAME
 
-start() {
-  status >/dev/null && return 0
-  echo "Starting ${NAME}.... See logs in ${LOG_DIR}."
+# Set file names
+LOG_FILE=$LOG_DIR/$NAME-$HOSTNAME-
+LOCK_FILE=$LOCK_DIR/$NAME
+PID_FILE=$PID_DIR/$NAME.pid
 
+# Create dirs if they don't exist
+[ -e $LOG_DIR ] || (mkdir -p $LOG_DIR && chown $USER: $LOG_DIR)
+[ -e $PID_DIR ] || mkdir -p $PID_DIR
+
+PROG_OPTS="tsd --config=${CONFIG}"
+
+start() {
+  echo -n "Starting ${NAME}: "
   ulimit -n $MAX_OPEN_FILES
 
-  # TODO: The tsdb program does not run in background. Make it happen.
   # TODO: Support non-root user and group. Currently running as root
   # is required because /usr/share/opentsdb/opentsdb_restart.py
-  # must be called as root.
+  # must be called as root.  This could be fixed with a sudo.
 
   # Set a default value for JVMARGS
   : ${JVMXMX:=-Xmx6000m}
-  : ${JVMARGS:=-DLOG_FILE_PREFIX=${LOG_FILE_PREFIX} -enableassertions -enablesystemassertions $JVMXMX -XX:OnOutOfMemoryError=/usr/share/opentsdb/opentsdb_restart.py}
+  : ${JVMARGS:=-DLOG_FILE_PREFIX=${LOG_FILE} -enableassertions -enablesystemassertions $JVMXMX -XX:OnOutOfMemoryError=/usr/share/opentsdb/opentsdb_restart.py}
   export JVMARGS
-  $PROG $PROG_OPTS 1> ${LOG_FILE_PREFIX}opentsdb.out 2> ${LOG_FILE_PREFIX}opentsdb.err &
+  daemon --user $USER --pidfile $PID_FILE "$PROG $PROG_OPTS 1> ${LOG_FILE_PREFIX}opentsdb.out 2> ${LOG_FILE_PREFIX}opentsdb.err"
+  retval=$?
+  sleep 2
+  echo
+  [ $retval -eq 0 ] && (findproc > $PID_FILE && touch $LOCK_FILE)
+  return $retval
 }
 
 stop() {
-  status >/dev/null || return 0
-  echo "Stopping ${NAME}..."
-  f=$(mktemp /tmp/pidfile.XXXXXXX)
-  findproc >$f
-  killproc -p $f > /dev/null
-  rm -f $f
+  echo -n "Stopping ${NAME}: "
+  killproc -p $PID_FILE $NAME
+  retval=$?
+  echo
+  [ $retval -eq 0 ] && (rm -f $PID_FILE && rm -f $LOCK_FILE)
+  return $retval
 }
 
 restart() {
@@ -63,7 +102,7 @@ force_reload() {
 
 rh_status() {
     # run checks to determine if the service is running or use generic status
-    status
+    status -p $PID_FILE -l $LOCK_FILE $NAME
 }
 
 rh_status_q() {
@@ -71,21 +110,8 @@ rh_status_q() {
 }
 
 findproc() {
-    pgrep -f '^java .* net.opentsdb.tools.TSDMain'
+    pgrep -f "^java .* net.opentsdb.tools.TSDMain .*${NAME}"
 }
-
-status() {
-    pid=$(findproc)
-    if [ -n "$pid" ]
-    then
-        echo "${NAME} is running... (pid $pid)"
-        return 0
-    else
-        echo "${NAME} is stopped."
-        return 1
-    fi
-}
-
 
 case "$1" in
     start)
